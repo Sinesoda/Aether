@@ -136,7 +136,6 @@ def _default_config() -> dict:
     return {
         "world": {"nx": 64, "ny": 64},
         "tick_rate": 30,
-        "retain_ratio": 0.5,
         "fractal_strength": 0.3,
         "phi_decay": 0.618,
         "edge_blend": 0.7,
@@ -157,7 +156,7 @@ def _merge_defaults(data: dict) -> dict:
     if "world" in data:
         d["world"] = {**d["world"], **data["world"]}
     for k in (
-        "tick_rate", "retain_ratio", "fractal_strength", "phi_decay", "edge_blend",
+        "tick_rate", "fractal_strength", "phi_decay", "edge_blend",
         "seed", "lock_seed", "actual_seed_used", "render_scale", "view_mode",
         "unified_show_a", "unified_show_b", "unified_show_ab",
         "initial_pos", "initial_neg", "tick_count",

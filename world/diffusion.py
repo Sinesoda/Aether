@@ -1,7 +1,6 @@
 """
 Per-tick update: diffusion then interaction.
-Diffusion: each cell retains RETAIN_RATIO (50%), distributes the rest to 8 neighbors;
-cardinal (N/S/E/W) weight > diagonal. Unchanged.
+Diffusion: golden-decay 3×3 kernel (center 1, ring phi_decay), normalized; isotropic, vectorized.
 Interaction: cancel a fraction of overlap; redistribute to boundaries of overlap
 (edge-enhancing Laplacian + golden-ratio smooth) so filamentary/branching structure emerges.
 All convolutions vectorized (numpy slices only). Totals conserved.
@@ -9,16 +8,7 @@ All convolutions vectorized (numpy slices only). Totals conserved.
 
 import numpy as np
 
-from world.constants import (
-    RETAIN_RATIO,
-    CARDINAL_OFFSETS,
-    DIAGONAL_OFFSETS,
-)
 from world.grid import Grid
-
-# Of the fraction (1 - retain_ratio) sent to neighbors, cardinals get more than diagonals.
-W_CARDINAL = 0.2
-W_DIAGONAL = 0.05  # 4*0.2 + 4*0.05 = 1.0
 
 # Fractal interaction: strength; phi_decay for smooth component; edge blend for filaments
 DEFAULT_FRACTAL_STRENGTH = 0.3
@@ -42,26 +32,18 @@ def _convolve3x3_vectorized(arr: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     return out
 
 
-def _diffuse_channel(
-    grid: np.ndarray, nx: int, ny: int, retain_ratio: float
-) -> np.ndarray:
-    """One channel: retain retain_ratio, spread rest to 8 neighbors. Returns new array."""
-    out_c = (1.0 - retain_ratio) * W_CARDINAL
-    out_d = (1.0 - retain_ratio) * W_DIAGONAL
-    out = np.zeros_like(grid)
-    for i in range(nx):
-        for j in range(ny):
-            val = grid[i, j]
-            out[i, j] = retain_ratio * val
-            for di, dj in CARDINAL_OFFSETS:
-                ni, nj = i + di, j + dj
-                if 0 <= ni < nx and 0 <= nj < ny:
-                    out[i, j] += out_c * grid[ni, nj]
-            for di, dj in DIAGONAL_OFFSETS:
-                ni, nj = i + di, j + dj
-                if 0 <= ni < nx and 0 <= nj < ny:
-                    out[i, j] += out_d * grid[ni, nj]
-    return out
+def _diffuse_channel(grid: np.ndarray, phi_decay: float) -> np.ndarray:
+    """One channel: 3×3 kernel center=1, ring=phi_decay, normalized. Isotropic, vectorized."""
+    denom = 1.0 + 8.0 * phi_decay
+    kernel = np.array(
+        [
+            [phi_decay, phi_decay, phi_decay],
+            [phi_decay, 1.0, phi_decay],
+            [phi_decay, phi_decay, phi_decay],
+        ],
+        dtype=np.float64,
+    ) / denom
+    return _convolve3x3_vectorized(grid, kernel)
 
 
 def _seed_modulation(nx: int, ny: int, seed: int) -> np.ndarray:
@@ -127,15 +109,13 @@ def _interaction_step(
 
 def step(
     grid: Grid,
-    retain_ratio: float = RETAIN_RATIO,
     fractal_strength: float = DEFAULT_FRACTAL_STRENGTH,
     phi_decay: float = DEFAULT_PHI_DECAY,
     fractal_radius: int = DEFAULT_FRACTAL_RADIUS,
     edge_blend: float = DEFAULT_EDGE_BLEND,
     seed: int | None = None,
 ) -> None:
-    """One tick: diffuse both channels, then fractal interaction. Modifies grid in place."""
-    nx, ny = grid.shape
-    grid.positive_energy = _diffuse_channel(grid.positive_energy, nx, ny, retain_ratio)
-    grid.negative_energy = _diffuse_channel(grid.negative_energy, nx, ny, retain_ratio)
+    """One tick: diffuse both channels (golden-decay kernel), then fractal interaction. Modifies grid in place."""
+    grid.positive_energy = _diffuse_channel(grid.positive_energy, phi_decay)
+    grid.negative_energy = _diffuse_channel(grid.negative_energy, phi_decay)
     _interaction_step(grid, fractal_strength, phi_decay, fractal_radius, edge_blend, seed)

@@ -4,8 +4,11 @@ import pygame
 from typing import Callable
 
 import config
+from ui import tooltips
 
 FONT_SIZE = 16
+TOOLTIP_FONT_SIZE = 19
+TOOLTIP_SMALL_FONT_SIZE = 16
 LABEL_COLOR = (200, 200, 200)
 SLIDER_COLOR = (100, 100, 100)
 KNOB_COLOR = (180, 180, 180)
@@ -31,7 +34,6 @@ class ParamPanel:
             "nx": initial.get("nx", 64),
             "ny": initial.get("ny", 64),
             "tick_rate": initial.get("tick_rate", 30),
-            "retain_ratio": initial.get("retain_ratio", 0.5),
             "fractal_strength": initial.get("fractal_strength", 0.3),
             "phi_decay": initial.get("phi_decay", 0.618),
             "edge_blend": initial.get("edge_blend", 0.7),
@@ -61,11 +63,27 @@ class ParamPanel:
         self._dropdown_option_rects: list[tuple[str, pygame.Rect]] = []
         self._config_dropdown_expanded = False
         self._config_dropdown_option_rects: list[tuple[tuple[int, str], pygame.Rect]] = []
+        self._tooltip_rects: dict[str, pygame.Rect] = {}
+        self._hover_tooltip_text = None
+        self._small_font = None
+        self._tooltip_font = None
+        self._tooltip_small_font = None
 
     def _ensure_font(self) -> pygame.font.Font:
         if self._font is None:
             self._font = pygame.font.Font(None, FONT_SIZE)
         return self._font
+
+    def _ensure_small_font(self) -> pygame.font.Font:
+        if self._small_font is None:
+            self._small_font = pygame.font.Font(None, 14)
+        return self._small_font
+
+    def _ensure_tooltip_fonts(self) -> tuple[pygame.font.Font, pygame.font.Font]:
+        if self._tooltip_font is None:
+            self._tooltip_font = pygame.font.Font(None, TOOLTIP_FONT_SIZE)
+            self._tooltip_small_font = pygame.font.Font(None, TOOLTIP_SMALL_FONT_SIZE)
+        return self._tooltip_font, self._tooltip_small_font
 
     def get_params(self) -> dict:
         return self.params.copy()
@@ -181,44 +199,41 @@ class ParamPanel:
         self._slider_rects["tick_rate"] = (sr, 1, 60)
         y += slider_h + gap
 
-        # Retain ratio %
-        rr_pct = max(1, min(99, int(self.params["retain_ratio"] * 100)))
-        label = font.render("Retain ratio %", True, LABEL_COLOR)
-        surface.blit(label, (x, y))
-        y += line_h
-        sr = _draw_slider(surface, x, y, slider_w, slider_h, rr_pct, 1, 99)
-        _draw_slider_value(surface, font, x + slider_w + 4, y, f"{rr_pct}%")
-        self._slider_rects["retain_ratio"] = (sr, 1, 99)
-        y += slider_h + gap
-
         # Fractal strength %
+        self._tooltip_rects.clear()
         fs_pct = max(0, min(100, int(self.params["fractal_strength"] * 100)))
+        row_y = y
         label = font.render("Fractal strength %", True, LABEL_COLOR)
         surface.blit(label, (x, y))
         y += line_h
         sr = _draw_slider(surface, x, y, slider_w, slider_h, fs_pct, 0, 100)
         _draw_slider_value(surface, font, x + slider_w + 4, y, f"{fs_pct}%")
         self._slider_rects["fractal_strength"] = (sr, 0, 100)
+        self._tooltip_rects["fractal_strength"] = pygame.Rect(x, row_y, self.rect.width - 16, line_h + slider_h + gap)
         y += slider_h + gap
 
-        # Phi decay
+        # Phi decay (Golden decay)
         pd_int = max(40, min(90, int(self.params["phi_decay"] * 100)))
+        row_y = y
         label = font.render("Golden decay (×0.01)", True, LABEL_COLOR)
         surface.blit(label, (x, y))
         y += line_h
         sr = _draw_slider(surface, x, y, slider_w, slider_h, pd_int, 40, 90)
         _draw_slider_value(surface, font, x + slider_w + 4, y, f"0.{pd_int}")
         self._slider_rects["phi_decay"] = (sr, 40, 90)
+        self._tooltip_rects["phi_decay"] = pygame.Rect(x, row_y, self.rect.width - 16, line_h + slider_h + gap)
         y += slider_h + gap
 
         # Edge blend %
         eb_pct = max(0, min(100, int(self.params["edge_blend"] * 100)))
+        row_y = y
         label = font.render("Edge blend %", True, LABEL_COLOR)
         surface.blit(label, (x, y))
         y += line_h
         sr = _draw_slider(surface, x, y, slider_w, slider_h, eb_pct, 0, 100)
         _draw_slider_value(surface, font, x + slider_w + 4, y, f"{eb_pct}%")
         self._slider_rects["edge_blend"] = (sr, 0, 100)
+        self._tooltip_rects["edge_blend"] = pygame.Rect(x, row_y, self.rect.width - 16, line_h + slider_h + gap)
         y += slider_h + gap
 
         # Start / Pause / Resume and Restart (side by side)
@@ -316,6 +331,17 @@ class ParamPanel:
             surface.blit(t, (del_rect.x + 6, del_rect.y + 4))
             self._button_rects["delete_config"] = del_rect
         y += max(18, btn_h) + gap
+
+    def update_hover_tooltip(self, pos: tuple[int, int]) -> None:
+        self._hover_tooltip_text = None
+        for key, r in self._tooltip_rects.items():
+            if r.collidepoint(pos):
+                self._hover_tooltip_text = tooltips.PARAM_TOOLTIPS.get(key)
+                return
+
+    def draw_tooltip(self, surface: pygame.Surface) -> None:
+        tf, sf = self._ensure_tooltip_fonts()
+        tooltips.draw_tooltip(surface, tf, sf, self._hover_tooltip_text, pygame.mouse.get_pos())
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         """Returns True if event was consumed."""
@@ -417,11 +443,13 @@ class ParamPanel:
                 return True
         elif event.type == pygame.MOUSEBUTTONUP:
             self._dragging = None
-        elif event.type == pygame.MOUSEMOTION and self._dragging is not None:
-            if self._dragging in self._slider_rects:
-                sr, lo, hi = self._slider_rects[self._dragging]
-                self._set_slider_value(self._dragging, event.pos, sr, lo, hi)
-            return True
+        elif event.type == pygame.MOUSEMOTION:
+            self.update_hover_tooltip(event.pos)
+            if self._dragging is not None:
+                if self._dragging in self._slider_rects:
+                    sr, lo, hi = self._slider_rects[self._dragging]
+                    self._set_slider_value(self._dragging, event.pos, sr, lo, hi)
+                return True
         return False
 
     def _parse_seed_buffer(self) -> None:
@@ -444,7 +472,6 @@ class ParamPanel:
         self.params["nx"] = world.get("nx", self.params["nx"])
         self.params["ny"] = world.get("ny", self.params["ny"])
         self.params["tick_rate"] = cfg.get("tick_rate", self.params["tick_rate"])
-        self.params["retain_ratio"] = cfg.get("retain_ratio", self.params["retain_ratio"])
         self.params["fractal_strength"] = cfg.get("fractal_strength", self.params["fractal_strength"])
         self.params["phi_decay"] = cfg.get("phi_decay", self.params["phi_decay"])
         self.params["edge_blend"] = cfg.get("edge_blend", self.params["edge_blend"])
@@ -474,9 +501,7 @@ class ParamPanel:
         t = (pos[0] - slider_rect.x) / max(1, slider_rect.width - 8)
         t = max(0, min(1, t))
         val = int(lo + t * (hi - lo))
-        if key == "retain_ratio":
-            self.params[key] = val / 100.0
-        elif key == "fractal_strength":
+        if key == "fractal_strength":
             self.params[key] = val / 100.0
         elif key == "phi_decay":
             self.params[key] = val / 100.0
@@ -491,7 +516,6 @@ class ParamPanel:
         return {
             "world": {"nx": self.params["nx"], "ny": self.params["ny"]},
             "tick_rate": self.params["tick_rate"],
-            "retain_ratio": self.params["retain_ratio"],
             "fractal_strength": self.params["fractal_strength"],
             "phi_decay": self.params["phi_decay"],
             "edge_blend": self.params["edge_blend"],

@@ -6,7 +6,6 @@ tick_rate (independent of frame rate). World, UI, and config are wired here.
 import pygame
 
 from world import Grid, step
-from world.constants import RETAIN_RATIO
 from world.diffusion import DEFAULT_FRACTAL_STRENGTH, DEFAULT_PHI_DECAY, DEFAULT_EDGE_BLEND
 from world.seed_util import pick_initial_positions
 from ui.grid_view import draw_grid
@@ -14,9 +13,9 @@ from ui.panel import ParamPanel
 import config
 
 TITLE = "Aether"
-WIDTH, HEIGHT = 1280, 640
+WIDTH, HEIGHT = 960, 640
 BACKGROUND = (0, 0, 0)
-GRID_PANEL_WIDTH = 640  # left panel for grid
+GRID_PANEL_WIDTH = 640  # left panel for grid; panel is half that (320)
 
 
 def run() -> None:
@@ -107,7 +106,6 @@ def run() -> None:
             "nx": nx,
             "ny": ny,
             "tick_rate": cfg.get("tick_rate", 30),
-            "retain_ratio": cfg.get("retain_ratio", RETAIN_RATIO),
             "fractal_strength": cfg.get("fractal_strength", DEFAULT_FRACTAL_STRENGTH),
             "phi_decay": cfg.get("phi_decay", DEFAULT_PHI_DECAY),
             "edge_blend": cfg.get("edge_blend", DEFAULT_EDGE_BLEND),
@@ -160,12 +158,11 @@ def run() -> None:
             tick_accum -= num_ticks
             tick_accum = min(tick_accum, max_ticks_per_frame)  # prevent unbounded backlog
             total_ticks += num_ticks
-            retain = max(0.01, min(0.99, params["retain_ratio"]))
             strength = max(0.0, min(1.0, params["fractal_strength"]))
             phi = max(0.4, min(0.9, params["phi_decay"]))
             edge = max(0.0, min(1.0, params["edge_blend"]))
             for _ in range(num_ticks):
-                step(grid, retain_ratio=retain, fractal_strength=strength, phi_decay=phi, edge_blend=edge, seed=actual_seed_used)
+                step(grid, fractal_strength=strength, phi_decay=phi, edge_blend=edge, seed=actual_seed_used)
 
         screen.fill(BACKGROUND)
         draw_grid(
@@ -180,6 +177,7 @@ def run() -> None:
             unified_show_ab=params.get("unified_show_ab", True),
         )
         panel.draw(screen, tick_count=total_ticks, actual_used_seed=actual_seed_used)
+        panel.draw_tooltip(screen)
         pygame.display.flip()
 
     pygame.quit()
