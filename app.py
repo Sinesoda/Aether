@@ -109,6 +109,9 @@ def run() -> None:
             "fractal_strength": cfg.get("fractal_strength", DEFAULT_FRACTAL_STRENGTH),
             "phi_decay": cfg.get("phi_decay", DEFAULT_PHI_DECAY),
             "edge_blend": cfg.get("edge_blend", DEFAULT_EDGE_BLEND),
+            "boundary_consume": cfg.get("boundary_consume", True),
+            "legacy_diffusion": cfg.get("legacy_diffusion", cfg.get("retain_ratio") is not None),
+            "retain_ratio": cfg.get("retain_ratio", 0.5),
             "seed": cfg.get("actual_seed_used", seed),
             "lock_seed": cfg.get("lock_seed", False),
             "render_scale": cfg.get("render_scale", 1),
@@ -161,8 +164,10 @@ def run() -> None:
             strength = max(0.0, min(1.0, params["fractal_strength"]))
             phi = max(0.4, min(0.9, params["phi_decay"]))
             edge = max(0.0, min(1.0, params["edge_blend"]))
+            boundary_consume = params.get("boundary_consume", True)
+            retain_ratio = params.get("retain_ratio") if params.get("legacy_diffusion") else None
             for _ in range(num_ticks):
-                step(grid, fractal_strength=strength, phi_decay=phi, edge_blend=edge, seed=actual_seed_used)
+                step(grid, fractal_strength=strength, phi_decay=phi, edge_blend=edge, seed=actual_seed_used, boundary_consume=boundary_consume, retain_ratio=retain_ratio)
 
         screen.fill(BACKGROUND)
         draw_grid(

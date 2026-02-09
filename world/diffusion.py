@@ -1,9 +1,7 @@
 """
 Per-tick update: diffusion then interaction.
-Diffusion: golden-decay 3×3 kernel (center 1, ring phi_decay), normalized; isotropic, vectorized.
-Interaction: cancel a fraction of overlap; redistribute to boundaries of overlap
-(edge-enhancing Laplacian + golden-ratio smooth) so filamentary/branching structure emerges.
-All convolutions vectorized (numpy slices only). Totals conserved.
+Diffusion: golden-decay 3×3 kernel. boundary_consume=True = zero-pad (mass lost at edges, dramatic).
+boundary_consume=False = reflective BC (totals conserved).
 """
 
 import numpy as np
@@ -19,9 +17,12 @@ DEFAULT_EDGE_BLEND = 0.7  # 0 = smooth blob, 1 = strong edges (filaments/branchi
 # Fixed 3×3 Laplacian: positive where cell > neighbors → edges/boundaries
 LAPLACIAN_3X3 = np.array([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=np.float64)
 
+# Legacy diffusion kernel weights (cardinal 0.2, diagonal 0.05 per neighbor).
+_W_CARDINAL, _W_DIAGONAL = 0.2, 0.05
+
 
 def _convolve3x3_vectorized(arr: np.ndarray, kernel: np.ndarray) -> np.ndarray:
-    """Convolve with 3×3 kernel; same shape; zero-pad. One pass with numpy slices."""
+    """Convolve with 3×3 kernel; same shape; zero-pad."""
     nx, ny = arr.shape
     out = np.zeros_like(arr)
     pad = np.zeros((nx + 2, ny + 2), dtype=arr.dtype)
@@ -32,8 +33,43 @@ def _convolve3x3_vectorized(arr: np.ndarray, kernel: np.ndarray) -> np.ndarray:
     return out
 
 
-def _diffuse_channel(grid: np.ndarray, phi_decay: float) -> np.ndarray:
-    """One channel: 3×3 kernel center=1, ring=phi_decay, normalized. Isotropic, vectorized."""
+def _pad_reflect(arr: np.ndarray) -> np.ndarray:
+    """Pad by one cell each side using reflection. Convolution then conserves total."""
+    nx, ny = arr.shape
+    pad = np.zeros((nx + 2, ny + 2), dtype=arr.dtype)
+    pad[1:-1, 1:-1] = arr
+    pad[0, 1:-1] = arr[0, :]
+    pad[-1, 1:-1] = arr[-1, :]
+    pad[1:-1, 0] = arr[:, 0]
+    pad[1:-1, -1] = arr[:, -1]
+    pad[0, 0], pad[0, -1], pad[-1, 0], pad[-1, -1] = arr[0, 0], arr[0, -1], arr[-1, 0], arr[-1, -1]
+    return pad
+
+
+def _convolve3x3_reflect(arr: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    """Convolve with 3×3 kernel; reflective BC. Conserves total mass."""
+    nx, ny = arr.shape
+    pad = _pad_reflect(arr)
+    out = np.zeros_like(arr)
+    for ki in range(3):
+        for kj in range(3):
+            out += kernel[ki, kj] * pad[ki : ki + nx, kj : kj + ny]
+    return out
+
+
+def _diffuse_legacy(grid: np.ndarray, retain_ratio: float) -> np.ndarray:
+    """Legacy diffusion: center retain_ratio, cardinals (1-r)*0.2, diagonals (1-r)*0.05. Zero-pad, vectorized."""
+    r = max(0.01, min(0.99, retain_ratio))
+    c, d = (1.0 - r) * _W_CARDINAL, (1.0 - r) * _W_DIAGONAL
+    kernel = np.array(
+        [[d, c, d], [c, r, c], [d, c, d]],
+        dtype=np.float64,
+    )
+    return _convolve3x3_vectorized(grid, kernel)
+
+
+def _diffuse_channel(grid: np.ndarray, phi_decay: float, boundary_consume: bool) -> np.ndarray:
+    """One channel: golden-decay kernel. boundary_consume=True = zero-pad (leaky); False = reflective (conserved)."""
     denom = 1.0 + 8.0 * phi_decay
     kernel = np.array(
         [
@@ -43,7 +79,9 @@ def _diffuse_channel(grid: np.ndarray, phi_decay: float) -> np.ndarray:
         ],
         dtype=np.float64,
     ) / denom
-    return _convolve3x3_vectorized(grid, kernel)
+    if boundary_consume:
+        return _convolve3x3_vectorized(grid, kernel)
+    return _convolve3x3_reflect(grid, kernel)
 
 
 def _seed_modulation(nx: int, ny: int, seed: int) -> np.ndarray:
@@ -114,8 +152,14 @@ def step(
     fractal_radius: int = DEFAULT_FRACTAL_RADIUS,
     edge_blend: float = DEFAULT_EDGE_BLEND,
     seed: int | None = None,
+    boundary_consume: bool = True,
+    retain_ratio: float | None = None,
 ) -> None:
-    """One tick: diffuse both channels (golden-decay kernel), then fractal interaction. Modifies grid in place."""
-    grid.positive_energy = _diffuse_channel(grid.positive_energy, phi_decay)
-    grid.negative_energy = _diffuse_channel(grid.negative_energy, phi_decay)
+    """One tick: diffuse then interaction. If boundary_consume and retain_ratio given (from old config), use legacy diffusion; else golden-decay."""
+    if boundary_consume and retain_ratio is not None:
+        grid.positive_energy = _diffuse_legacy(grid.positive_energy, retain_ratio)
+        grid.negative_energy = _diffuse_legacy(grid.negative_energy, retain_ratio)
+    else:
+        grid.positive_energy = _diffuse_channel(grid.positive_energy, phi_decay, boundary_consume)
+        grid.negative_energy = _diffuse_channel(grid.negative_energy, phi_decay, boundary_consume)
     _interaction_step(grid, fractal_strength, phi_decay, fractal_radius, edge_blend, seed)

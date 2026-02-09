@@ -29,6 +29,10 @@ PARAM_TOOLTIPS = {
         "How much we favor the boundary of the overlap vs a smooth spread when placing the moved energy.",
         "Min = soft, blob-like boundaries; max = sharp edges, filaments and branches.",
     ),
+    "retain_ratio": (
+        "Retain-ratio diffusion: fraction of energy each cell keeps; the rest goes to 8 neighbors (cardinals 0.2 each, diagonals 0.05 each).",
+        "Min = fast spread; max = slow spread, energy lingers.",
+    ),
 }
 
 

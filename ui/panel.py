@@ -45,6 +45,9 @@ class ParamPanel:
             "unified_show_a": initial.get("unified_show_a", True),
             "unified_show_b": initial.get("unified_show_b", True),
             "unified_show_ab": initial.get("unified_show_ab", True),
+            "boundary_consume": initial.get("boundary_consume", True),
+            "legacy_diffusion": initial.get("legacy_diffusion", initial.get("retain_ratio") is not None),
+            "retain_ratio": initial.get("retain_ratio", 0.5),
             "paused": True,
         }
         self.on_save = on_save
@@ -236,6 +239,45 @@ class ParamPanel:
         self._tooltip_rects["edge_blend"] = pygame.Rect(x, row_y, self.rect.width - 16, line_h + slider_h + gap)
         y += slider_h + gap
 
+        # Boundary consume: checked = zero-pad (mass lost at edges, dramatic); unchecked = reflective (conserved)
+        row_y = y
+        box = pygame.Rect(x, y + 2, 14, 14)
+        if self.params["boundary_consume"]:
+            pygame.draw.rect(surface, KNOB_COLOR, box)
+            pygame.draw.rect(surface, LABEL_COLOR, box, 1)
+        else:
+            pygame.draw.rect(surface, SLIDER_COLOR, box)
+            pygame.draw.rect(surface, LABEL_COLOR, box, 1)
+        t = font.render("Boundary consume", True, LABEL_COLOR)
+        surface.blit(t, (x + 18, y + 2))
+        self._button_rects["boundary_consume"] = box.union(pygame.Rect(x, y, 18 + font.size("Boundary consume")[0], 18))
+        y += 18 + gap
+
+        # Retain-ratio diffusion: when enabled, use retain_ratio + cardinal/diagonal weights and show slider
+        row_y = y
+        box = pygame.Rect(x, y + 2, 14, 14)
+        if self.params["legacy_diffusion"]:
+            pygame.draw.rect(surface, KNOB_COLOR, box)
+            pygame.draw.rect(surface, LABEL_COLOR, box, 1)
+        else:
+            pygame.draw.rect(surface, SLIDER_COLOR, box)
+            pygame.draw.rect(surface, LABEL_COLOR, box, 1)
+        t = font.render("Retain-ratio diffusion", True, LABEL_COLOR)
+        surface.blit(t, (x + 18, y + 2))
+        self._button_rects["legacy_diffusion"] = box.union(pygame.Rect(x, y, 18 + font.size("Retain-ratio diffusion")[0], 18))
+        y += 18 + gap
+        if self.params["legacy_diffusion"]:
+            rr_pct = max(1, min(99, int(self.params["retain_ratio"] * 100)))
+            row_y = y
+            label = font.render("Retain ratio %", True, LABEL_COLOR)
+            surface.blit(label, (x, y))
+            y += line_h
+            sr = _draw_slider(surface, x, y, slider_w, slider_h, rr_pct, 1, 99)
+            _draw_slider_value(surface, font, x + slider_w + 4, y, f"{rr_pct}%")
+            self._slider_rects["retain_ratio"] = (sr, 1, 99)
+            self._tooltip_rects["retain_ratio"] = pygame.Rect(x, row_y, self.rect.width - 16, line_h + slider_h + gap)
+            y += slider_h + gap
+
         # Start / Pause / Resume and Restart (side by side)
         btn_h = 26
         pause_rect = pygame.Rect(x, y, 100, btn_h)
@@ -400,6 +442,10 @@ class ParamPanel:
                         self.on_restart()
                     elif key == "lock_seed":
                         self.params["lock_seed"] = not self.params["lock_seed"]
+                    elif key == "boundary_consume":
+                        self.params["boundary_consume"] = not self.params["boundary_consume"]
+                    elif key == "legacy_diffusion":
+                        self.params["legacy_diffusion"] = not self.params["legacy_diffusion"]
                     elif key == "save":
                         self.on_save()
                     elif key in ("unified_show_a", "unified_show_b", "unified_show_ab"):
@@ -475,6 +521,9 @@ class ParamPanel:
         self.params["fractal_strength"] = cfg.get("fractal_strength", self.params["fractal_strength"])
         self.params["phi_decay"] = cfg.get("phi_decay", self.params["phi_decay"])
         self.params["edge_blend"] = cfg.get("edge_blend", self.params["edge_blend"])
+        self.params["boundary_consume"] = cfg.get("boundary_consume", True)
+        self.params["legacy_diffusion"] = cfg.get("legacy_diffusion", cfg.get("retain_ratio") is not None)
+        self.params["retain_ratio"] = cfg.get("retain_ratio", 0.5)
         self.params["seed"] = cfg.get("seed", self.params["seed"])
         self.params["lock_seed"] = cfg.get("lock_seed", self.params["lock_seed"])
         self.params["render_scale"] = cfg.get("render_scale", self.params["render_scale"])
@@ -503,6 +552,8 @@ class ParamPanel:
         val = int(lo + t * (hi - lo))
         if key == "fractal_strength":
             self.params[key] = val / 100.0
+        elif key == "retain_ratio":
+            self.params[key] = val / 100.0
         elif key == "phi_decay":
             self.params[key] = val / 100.0
         elif key == "edge_blend":
@@ -513,12 +564,14 @@ class ParamPanel:
             self.params[key] = max(4, self.params[key])
 
     def _config_dict(self) -> dict:
-        return {
+        out = {
             "world": {"nx": self.params["nx"], "ny": self.params["ny"]},
             "tick_rate": self.params["tick_rate"],
             "fractal_strength": self.params["fractal_strength"],
             "phi_decay": self.params["phi_decay"],
             "edge_blend": self.params["edge_blend"],
+            "boundary_consume": self.params["boundary_consume"],
+            "legacy_diffusion": self.params["legacy_diffusion"],
             "seed": self.params["seed"],
             "lock_seed": self.params["lock_seed"],
             "render_scale": self.params["render_scale"],
@@ -529,6 +582,9 @@ class ParamPanel:
             "initial_pos": [self.params["nx"] // 2, self.params["ny"] // 2],
             "initial_neg": [self.params["nx"] // 2 - 1, self.params["ny"] // 2],
         }
+        if self.params.get("legacy_diffusion"):
+            out["retain_ratio"] = self.params["retain_ratio"]
+        return out
 
 
 def _draw_slider(

@@ -139,6 +139,8 @@ def _default_config() -> dict:
         "fractal_strength": 0.3,
         "phi_decay": 0.618,
         "edge_blend": 0.7,
+        "boundary_consume": False,
+        "legacy_diffusion": False,
         "seed": -1,
         "lock_seed": False,
         "render_scale": 1,
@@ -156,13 +158,17 @@ def _merge_defaults(data: dict) -> dict:
     if "world" in data:
         d["world"] = {**d["world"], **data["world"]}
     for k in (
-        "tick_rate", "fractal_strength", "phi_decay", "edge_blend",
+        "tick_rate", "retain_ratio", "fractal_strength", "phi_decay", "edge_blend", "boundary_consume", "legacy_diffusion",
         "seed", "lock_seed", "actual_seed_used", "render_scale", "view_mode",
         "unified_show_a", "unified_show_b", "unified_show_ab",
         "initial_pos", "initial_neg", "tick_count",
     ):
         if k in data:
             d[k] = data[k]
+    if "boundary_consume" not in data and data:
+        d["boundary_consume"] = True
+    if "legacy_diffusion" not in data and data.get("retain_ratio") is not None:
+        d["legacy_diffusion"] = True
     return d
 
 
