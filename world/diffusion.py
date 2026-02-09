@@ -155,11 +155,24 @@ def step(
     boundary_consume: bool = True,
     retain_ratio: float | None = None,
 ) -> None:
-    """One tick: diffuse then interaction. If boundary_consume and retain_ratio given (from old config), use legacy diffusion; else golden-decay."""
+    """One tick: diffuse then interaction. If boundary_consume and retain_ratio given, use retain-ratio diffusion; else golden-decay. When boundary_consume, zero-pad loses mass so we re-inject it uniformly to conserve."""
+    nx, ny = grid.shape
+    n_cells = nx * ny
     if boundary_consume and retain_ratio is not None:
+        s_pos = float(np.sum(grid.positive_energy))
+        s_neg = float(np.sum(grid.negative_energy))
         grid.positive_energy = _diffuse_legacy(grid.positive_energy, retain_ratio)
         grid.negative_energy = _diffuse_legacy(grid.negative_energy, retain_ratio)
+        grid.positive_energy += (s_pos - float(np.sum(grid.positive_energy))) / n_cells
+        grid.negative_energy += (s_neg - float(np.sum(grid.negative_energy))) / n_cells
     else:
+        if boundary_consume:
+            s_pos = float(np.sum(grid.positive_energy))
+            s_neg = float(np.sum(grid.negative_energy))
         grid.positive_energy = _diffuse_channel(grid.positive_energy, phi_decay, boundary_consume)
         grid.negative_energy = _diffuse_channel(grid.negative_energy, phi_decay, boundary_consume)
+        if boundary_consume:
+            grid.positive_energy += (s_pos - float(np.sum(grid.positive_energy))) / n_cells
+            grid.negative_energy += (s_neg - float(np.sum(grid.negative_energy))) / n_cells
     _interaction_step(grid, fractal_strength, phi_decay, fractal_radius, edge_blend, seed)
+
